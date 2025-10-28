@@ -3,6 +3,8 @@ from sqlalchemy.future import select
 from workout_api.contrib.dependencies import DatabaseDependency
 from workout_api.atleta.models import AtletaModel
 from workout_api.atleta.schemas import AtletaResumo
+from sqlalchemy.exc import IntegrityError
+from workout_api.atleta.schemas import AtletaIn, AtletaOut
 
 router = APIRouter()
 
@@ -43,3 +45,39 @@ async def query(
     ]
 
     return atletas_resumo
+
+router = APIRouter()
+
+@router.post(
+    '/',
+    summary='Criar um novo Atleta',
+    status_code=status.HTTP_201_CREATED,
+    response_model=AtletaOut,
+)
+async def create(db_session: DatabaseDependency, atleta_in: AtletaIn) -> AtletaOut:
+    """
+    Cria um novo atleta no banco de dados.
+    Caso o CPF já esteja cadastrado, retorna status 303 e mensagem personalizada.
+    """
+    try:
+        atleta = AtletaModel(**atleta_in.model_dump())
+        db_session.add(atleta)
+        await db_session.commit()
+        await db_session.refresh(atleta)
+        return atleta
+
+    except IntegrityError as e:
+        await db_session.rollback()
+
+        # 🧠 Detecta se o erro está relacionado ao CPF
+        if "cpf" in str(e.orig).lower():
+            raise HTTPException(
+                status_code=status.HTTP_303_SEE_OTHER,
+                detail=f"Já existe um atleta cadastrado com o cpf: {atleta_in.cpf}"
+            )
+
+        # Caso seja outro tipo de erro de integridade
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Erro de integridade nos dados fornecidos."
+        )
